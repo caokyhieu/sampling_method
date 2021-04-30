@@ -5,6 +5,7 @@ from utils import plot_hist
 from abc import ABC,abstractmethod
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 class ABCSampling(ABC):
     def __init__(self,data,threshold):
@@ -49,22 +50,29 @@ class ABCSampling(ABC):
             if self.distance(self.data,replica) < self.threshold:
                 samples.append(proposal)
                 self.accept +=1
+                if progress_bar:
+                    _range.set_description(f'Aceept rate: {self.accept/(i+1):.2f}')
+        
+        if progress_bar:
+            _range.close()
     
         return samples        
 
 class WassersteinABC(ABCSampling):
 
-    def __init__(self,data,threshold):
+    def __init__(self,data,threshold,n_dim = 4):
         super().__init__(data,threshold)
+        self.n_dim = n_dim
         
         self.set_prior()
+        self.data_dim = np.array(data).shape[-1]
     
     def set_prior(self):
-        self.prior = type('Prior', (object,), {'sample' : lambda n_samples: np.random.normal(loc=0,scale=1,size=n_samples)})
+        self.prior = type('Prior', (object,), {'sample' : lambda n_samples: np.random.multivariate_normal(mean=np.array([0 for i in range(self.data_dim)]),cov=np.eye(self.data_dim),size=n_samples)})
 
     def generate_replica(self,theta):
         # thetas = self.prior.sample(n_samples=len(self.data))
-        return np.random.uniform(low=theta - 2.0,high=theta + 2.0,size=len(self.data))
+        return np.array([np.random.normal(loc=theta,scale=2.0) for i in range(len(self.data))])
 
     def distance(self,data,replica):
         """
@@ -73,9 +81,10 @@ class WassersteinABC(ABCSampling):
         Improve by slice wasserstein distance: very impressive
         * Next move for multivariate data (2 dims)
         """
-        weight = np.random.multivariate_normal(mean=np.random.normal(size=4),cov = np.eye(4))
-        data = np.matmul(np.expand_dims(data,-1),np.expand_dims(weight,0))
-        replica = np.matmul(np.expand_dims(replica,-1),np.expand_dims(weight,0))
+        weight = np.random.multivariate_normal(mean=np.random.normal(size=self.n_dim),cov = np.eye(self.n_dim),size=self.data_dim)
+        weight = weight /np.sqrt(np.sum(weight**2,axis=0,keepdims=True))
+        data = np.matmul(data,weight)
+        replica = np.matmul(replica,weight)
       
         result = [stats.wasserstein_distance(data[:,i],replica[:,i]) for i in range(len(weight))]
 
@@ -84,18 +93,27 @@ class WassersteinABC(ABCSampling):
 
 if __name__ == '__main__':
     ### prior ~ N(0,1)
-    data = [np.random.normal(loc=theta,scale= 2.0) for theta in np.random.normal(loc=0,scale=1,size=1000)]
+    data = np.array([np.random.normal(loc=theta,scale= 2.0) for theta in np.random.multivariate_normal(mean=[0,0],cov=[[1,0],[0,1]],size=1000)])
     ##-> posterior has mean = mean(data) * n /(sigma^2 + n)
-    threshold = 1.2
-    posterior = WassersteinABC(data,threshold)
-    samples = posterior.sample(n_samples=100000,progress_bar=True)
-    print(np.array(samples).shape)
+    # print(f'Shape data: {np.array(data).shape}')
+    threshold = 1.4
+    n_dim = 10
+    posterior = WassersteinABC(data,threshold,n_dim=n_dim)
+    samples = posterior.sample(n_samples=10000,progress_bar=True)
+    samples = pd.DataFrame(samples,columns=['x1','x2'])
+    # print(np.array(samples).shape)
     # print(samples)
-    print(f'Accepted rate: {len(samples)/100000 * 100:.2f}%')
-    plt.hist(np.array(samples).squeeze(),bins=20)
-    plt.axvline(x=np.mean(samples),color="red")
-    plt.axvline(x=np.mean(data)*len(data)/(4+len(data)),color="purple")
-    plt.savefig('ABC.png')
+    sns_plot = sns.jointplot(data=samples, x="x1", y="x2")
+    mean = np.mean(data,axis=0) *len(data)*(1/4 )/(1/4*len(data)+1)
+    ax = sns_plot.ax_joint
+    ax.axvline(x=mean[0],color="red")
+    ax.axhline(y=mean[1],color="blue")
+    sns_plot.savefig('ABC.png')
+    # print(f'Accepted rate: {len(samples)/100000 * 100:.2f}%')
+    # plt.hist(np.array(samples).squeeze(),bins=20)
+    # plt.axvline(x=np.mean(samples),color="red")
+    # plt.axvline(x=np.mean(data)*len(data)/(4+len(data)),color="purple")
+    # plt.savefig('ABC.png')
 
 
 
