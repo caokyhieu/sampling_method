@@ -7,6 +7,7 @@ from utils import plot_hist
 from tqdm import tqdm
 import pdb
 from abc import ABC,abstractmethod
+from tqdm import tqdm,trange
 class MHSampling(ABC):
     def __init__(self,step_size=10.0):
        
@@ -40,11 +41,15 @@ class MHSampling(ABC):
                 old_val = new_val
                 # old_score = new_score 
                 self.iter+=1
+                if progress_bar:
+                    _range.set_description(f"Accepted rate: {self.iter/i * 100:.2f}")
                 # print('Accpeted')
             
             # print(new_score - old_score)
             sample.append(old_val)
             new_val =  self.jump(old_val)
+        if progress_bar:
+            _range.close()
 
         return sample
 
@@ -128,23 +133,31 @@ if __name__ == '__main__':
     init_x1 = 4.0
     init_x2 = 4.0
     n_samples=10000
+    scale = 4.0
     # start_point = .0
     result = []
-    for i in tqdm(range(n_samples)):
-        ### sampling conditional x2|x1 ~ N(m2 + sigma2/sigma1 * ro *(x1-m2),(1-ro^2)*sigma2^2)
-        # c =10.0
-        # jumps = lambda x: stats.norm(loc=x,scale=c)
-        target_x2 = lambda x:  - 1/(2 * (1-(1/4)**2)) * (x- 1 - 1/4 *(init_x1 - 1) )**2
-        mh = MetropolisHasting(target_x2,scale=1.)
-        init_x2_ = mh(init_x2,n_samples=1,progress_bar=False)
-        init_x2 = init_x2_[-1]
+    alpha_accept = 0
+    beta_accept = 0
+    with trange(n_samples) as t:
+        for i in t:
+            ### sampling conditional x2|x1 ~ N(m2 + sigma2/sigma1 * ro *(x1-m2),(1-ro^2)*sigma2^2)
+            # c =10.0
+            # jumps = lambda x: stats.norm(loc=x,scale=c)
+            target_x2 = lambda x:  - 1/(2 * (1-(1/4)**2)) * (x- 1 - 1/4 *(init_x1 - 1) )**2
+            mh = MetropolisHasting(target_x2,scale=scale)
+            init_x2_ = mh(init_x2,n_samples=1,progress_bar=False)
+            if init_x2 !=  init_x2_[-1]:
+                beta_accept+=1
+            init_x2 = init_x2_[-1]
 
-        target_x1 = lambda x:  - 1/(2 * (1-(1/4)**2)) * (x- 1 - 1/4 *(init_x2 - 1) )**2
-        mh.set_target(target_x1)
-        init_x1_= mh(init_x1,n_samples=1,progress_bar=False)
-        init_x1 = init_x1_[-1]
-
-        result.append([init_x1,init_x2])
+            target_x1 = lambda x:  - 1/(2 * (1-(1/4)**2)) * (x- 1 - 1/4 *(init_x2 - 1) )**2
+            mh.set_target(target_x1)
+            init_x1_= mh(init_x1,n_samples=1,progress_bar=False)
+            if init_x1 !=  init_x1_[-1]:
+                alpha_accept+=1
+            init_x1 = init_x1_[-1]
+            t.set_description(f'Rate a:{alpha_accept/(i+1):.2f}, Rate b: {beta_accept/(i+1):.2f} ')
+            result.append([init_x1,init_x2])
     
     plot_hist(np.array(result)[:,0],stats.norm,'x1_multi_variate.png',nbins=20)
     plot_hist(np.array(result)[:,1],stats.norm,'x2_multi_variate.png',nbins=20)

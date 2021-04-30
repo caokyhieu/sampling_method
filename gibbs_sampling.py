@@ -3,8 +3,8 @@ import scipy.stats as stats
 import pandas as pd
 from utils import plot_hist
 from abc import ABC,abstractmethod
-from tqdm import tqdm
-from metropolis_hasting import MetropolisHasting
+from tqdm import tqdm,trange
+from metropolis_hasting import MetropolisHasting,MHSampling
 from  scipy.special import gamma as gam_f
 from  scipy.special import loggamma as log_gam_f
 import matplotlib.pyplot as plt
@@ -42,6 +42,7 @@ class ConditionalAlpha(ConditionalDistribution):
         self.a1 = a1
         self.a2 = a2
         self.n_samples = n_samples
+        self.generator = MetropolisHasting(None,scale=self.scale)
         pass 
 
     def prob_func(self,beta,theta):
@@ -55,7 +56,8 @@ class ConditionalAlpha(ConditionalDistribution):
     def set_params(self,**kwargs):
         # self.generator = stats.beta
         self.__dict__.update(kwargs)
-        self.generator =  MetropolisHasting(self.prob_func(beta=self.beta,theta=self.theta),scale=1.)
+        self.generator.set_target(self.prob_func(beta=self.beta,theta=self.theta))
+        # self.generator =  MetropolisHasting(self.prob_func(beta=self.beta,theta=self.theta),scale=1.)
      
     def sample(self):
         return self.generator(self.alpha,n_samples=self.n_samples,progress_bar=False)[-1]
@@ -68,6 +70,7 @@ class ConditionalBeta(ConditionalDistribution):
         self.b1 = b1
         self.b2 = b2
         self.n_samples = n_samples
+        self.generator =  MetropolisHasting(None,scale=1.)
         # self.generator =  MetropolisHasting(alpha_func,scale=1.)
         pass 
 
@@ -82,7 +85,8 @@ class ConditionalBeta(ConditionalDistribution):
     def set_params(self,**kwargs):
         # self.generator = stats.beta
         self.__dict__.update(kwargs)
-        self.generator =  MetropolisHasting(self.prob_func(self.alpha,self.theta),scale=1.)
+        self.generator.set_target(self.prob_func(self.alpha,self.theta)) 
+        # =  MetropolisHasting(self.prob_func(self.alpha,self.theta),scale=1.)
      
     def sample(self):
         return self.generator(self.beta,n_samples=self.n_samples,progress_bar=False)[-1]
@@ -110,15 +114,23 @@ class GibbsSampling(ABC):
 
         """
         assert len(set(self.conditional.keys()).intersection(set(init_value.keys()))) == len(self.conditional)
-        _range = tqdm(range(n_samples)) if progress_bar else range(n_samples)
+        _range = trange(n_samples) if progress_bar else range(n_samples)
         samples = init_value
-        n = len(init_value)
+        # n = len(init_value)
         for i in _range:
             for key,cond in self.conditional.items():
                 cond.set_params(**{k:samples[k][-1] for k in samples})
+
                 new_val = cond.sample()
                 samples[key].append(new_val)
-        
+
+                if issubclass(cond.generator.__class__,MHSampling) and progress_bar:
+                    _range.set_description(f'Rate {key}: {cond.generator.iter/(i+1):.2f}')
+                    
+
+        if progress_bar:
+            _range.close()
+
         return {key:samples[key][1:] for key in self.conditional}
 
 class HospitalGibbsSampling(GibbsSampling):
